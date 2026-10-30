@@ -67,7 +67,7 @@ export default function Header() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Left: Logo & Brand Name */}
         <Link href="/homepage" className="flex items-center gap-3 group">
-          <div className="relative w-10 h-10 rounded-full overflow-hidden border border-secondary/30 bg-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+          <div className="relative w-10 h-10 rounded-full overflow-hidden bg-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
             <Image
               src="/menexpress_logo.png"
               alt="Men Express Logo"
@@ -78,15 +78,15 @@ export default function Header() {
               priority
             />
           </div>
-          <span className="font-extrabold text-xl md:text-2xl tracking-tight text-primary uppercase">
-            Men Express
+          <span className="font-bold text-xl md:text-2xl tracking-tight text-primary uppercase">
+            Men Express<sup className="text-[14px] ml-0.5 align-super">®</sup>
           </span>
         </Link>
 
         {/* Middle Right: Tagline (Desktop visible, mobile hidden) */}
         <div className="hidden md:flex items-center">
           <span className="font-bold text-base lg:text-lg text-primary tracking-wide">
-            We are here for Men
+             Wear Your Mind !!!
           </span>
         </div>
 
