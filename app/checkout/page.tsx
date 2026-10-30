@@ -13,25 +13,52 @@ import {
   Loader2,
   MapPin,
   ShoppingBag,
+  Tag,
 } from 'lucide-react';
 import Header from '@/components/header';
 import Footer from '@/components/footer';
 import CouponsSection from '@/components/couponsSection';
 import {
   useCart,
+  useAppliedCoupon,
   calculateCartSummary,
+  calculateDeliveryCharges,
   clearCart,
+  setAppliedCoupon,
+  AppliedCoupon,
 } from '@/lib/cartStore';
 import {
   getCustomerByMobile,
   getCustomerAddress,
   placeOnlineOrder,
 } from '@/lib/ordersStore';
+import { validateCoupon } from '@/lib/couponsStore';
 
 export default function CheckoutPage() {
   const router = useRouter();
   const items = useCart();
-  const summary = calculateCartSummary(items, 100);
+  const appliedCoupon = useAppliedCoupon();
+
+  // Coupon UI state
+  const [showCouponInput, setShowCouponInput] = useState(false);
+  const [couponInput, setCouponInput] = useState('');
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
+
+  // Delivery charges: upto 2 items = 100. For every more than 2, +1 add 50 to delivery
+  const deliveryCharges = calculateDeliveryCharges(
+    items.reduce((acc, i) => acc + i.quantity, 0)
+  );
+
+  const itemsSubtotal = items.reduce((acc, i) => acc + i.s_p * i.quantity, 0);
+  const rawEstimatedTotal = itemsSubtotal + deliveryCharges;
+  const isCouponActive =
+    appliedCoupon !== null &&
+    items.length > 0 &&
+    appliedCoupon.discount < rawEstimatedTotal;
+  const currentDiscount = isCouponActive ? appliedCoupon.discount : 0;
+  const summary = calculateCartSummary(items, deliveryCharges, currentDiscount);
+  const payableAmount = summary.grandTotal;
 
   // Form states
   const [mobile, setMobile] = useState('');
@@ -115,6 +142,47 @@ export default function CheckoutPage() {
     }
   };
 
+  // Coupon handling in checkout
+  const handleApplyCoupon = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCode = couponInput.trim().toUpperCase();
+    if (!cleanCode) {
+      setCouponError('Please enter a coupon code.');
+      return;
+    }
+
+    setCouponLoading(true);
+    setCouponError(null);
+
+    const itemsSubtotal = summary.totalSP;
+    const estimatedTotal = itemsSubtotal + deliveryCharges;
+
+    const result = await validateCoupon(cleanCode, itemsSubtotal, estimatedTotal);
+    setCouponLoading(false);
+
+    if (!result.valid || !result.coupon) {
+      setCouponError(result.error || 'Invalid coupon code.');
+      return;
+    }
+
+    const discountAmount = result.discount ?? Number(result.coupon.discount);
+
+    const couponData: AppliedCoupon = {
+      code: result.coupon.code,
+      discount: discountAmount,
+      sentence: result.coupon.sentence,
+    };
+
+    setAppliedCoupon(couponData);
+    setShowCouponInput(false);
+    setCouponInput('');
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponError(null);
+  };
+
   // Place order
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -166,8 +234,10 @@ export default function CheckoutPage() {
         },
         items,
         amount: summary.totalSP,
-        deliveryCharges: 100,
-        payableAmount: summary.totalSP + 100,
+        deliveryCharges,
+        discount: currentDiscount,
+        couponCode: appliedCoupon?.code || null,
+        payableAmount,
       });
 
       if (!result.success || !result.whatsappUrl) {
@@ -177,7 +247,7 @@ export default function CheckoutPage() {
       }
 
       // Order saved in online_orders & order_items successfully!
-      // Clear cart
+      // Clear cart and coupon
       clearCart();
 
       setOrderPlacedData({
@@ -298,225 +368,259 @@ export default function CheckoutPage() {
 
       {/* 3. Main Checkout Section */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 md:py-12">
-        {/* Back Link */}
-        <div className="mb-6">
+        <div className="flex items-center gap-3 mb-8">
           <Link
             href="/cart"
-            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-secondary hover:text-primary transition-colors cursor-pointer"
+            className="w-9 h-9 rounded-full border border-secondary/20 flex items-center justify-center text-primary hover:bg-surface transition-colors cursor-pointer"
+            aria-label="Back to Cart"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Back to Cart</span>
           </Link>
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold uppercase tracking-tight text-primary">
+              Checkout
+            </h1>
+            <p className="text-xs text-secondary">
+              Direct dispatch & WhatsApp verification (+91 9912999344)
+            </p>
+          </div>
         </div>
 
-        {/* 2 Columns: Delivery Details (left) & Final Order Summary (right) matching reference screenshot */}
-        <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-start">
-          {/* LEFT COLUMN: Delivery Details Card */}
-          <div className="lg:col-span-7 xl:col-span-8 p-5 sm:p-7 rounded-2xl border border-secondary/20 bg-surface shadow-xs space-y-6">
-            <div className="flex items-center justify-between pb-4 border-b border-secondary/15 flex-wrap gap-2">
+        {errorMessage && (
+          <div className="mb-6 p-4 rounded-xl bg-crimson/10 border border-crimson/30 text-crimson flex items-center gap-3 text-xs sm:text-sm">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+          {/* LEFT COLUMN: Customer Mobile Verification & Delivery Details */}
+          <div className="lg:col-span-7 xl:col-span-8 space-y-6">
+            {/* Step 1: Mobile Number Lookup */}
+            <div className="p-5 sm:p-6 rounded-2xl border border-secondary/20 bg-surface shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-secondary">
+                  Step 1 • Customer Identification
+                </span>
+                {isExistingCustomer && (
+                  <span className="text-xs font-bold text-discount flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Existing Customer
+                  </span>
+                )}
+              </div>
+
               <div>
-                <h2 className="text-xl sm:text-2xl font-extrabold text-primary tracking-tight">
-                  Delivery Details
-                </h2>
-                <p className="text-xs sm:text-sm text-secondary mt-0.5">
-                  Enter your mobile number and press Enter to auto-fill your saved address.
-                </p>
-              </div>
+                <label htmlFor="customer-mobile" className="block text-xs font-bold uppercase text-primary mb-1.5">
+                  Mobile Number (WhatsApp) <span className="text-crimson">*</span>
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-secondary">
+                      +91
+                    </span>
+                    <input
+                      id="customer-mobile"
+                      type="tel"
+                      value={mobile}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                        setMobile(val);
+                        if (val.length === 10) {
+                          handleSearchCustomer(val);
+                        }
+                      }}
+                      onKeyDown={handleMobileKeyDown}
+                      placeholder="9912999344"
+                      className="w-full pl-12 pr-4 py-3 rounded-xl border border-secondary/30 bg-background text-sm font-semibold text-primary focus:outline-none focus:border-primary transition-all tracking-wider"
+                      required
+                    />
+                  </div>
 
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent/15 border border-accent/40 text-[11px] font-bold text-primary">
-                <ShieldCheck className="w-3.5 h-3.5 text-discount" />
-                <span>Secure Order</span>
+                  <button
+                    type="button"
+                    onClick={() => handleSearchCustomer()}
+                    disabled={searchingCustomer || mobile.length < 10}
+                    className="px-4 sm:px-5 py-3 rounded-xl bg-primary text-surface font-bold text-xs uppercase tracking-wider hover:bg-charcoal transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
+                  >
+                    {searchingCustomer ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <>
+                        <Search className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Find Account</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {customerSearchStatus && (
+                  <p
+                    className={`mt-2 text-xs font-medium flex items-center gap-1.5 ${
+                      isExistingCustomer ? 'text-discount' : 'text-secondary'
+                    }`}
+                  >
+                    {isExistingCustomer && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
+                    <span>{customerSearchStatus}</span>
+                  </p>
+                )}
               </div>
             </div>
 
-            {/* Error Message */}
-            {errorMessage && (
-              <div className="p-3.5 rounded-xl bg-crimson/10 border border-crimson/30 text-crimson text-xs sm:text-sm flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{errorMessage}</span>
-              </div>
-            )}
+            {/* Step 2: Contact Information */}
+            <div className="p-5 sm:p-6 rounded-2xl border border-secondary/20 bg-surface shadow-xs space-y-4">
+              <span className="text-xs font-bold uppercase tracking-wider text-secondary block">
+                Step 2 • Contact Information
+              </span>
 
-            {/* Mobile Number Search Section (matching screenshot) */}
-            <div className="space-y-2 p-4 rounded-xl bg-background border border-secondary/20">
-              <div className="flex items-center justify-between text-xs font-bold text-primary uppercase">
-                <span className="flex items-center gap-1.5">
-                  <Phone className="w-3.5 h-3.5 text-secondary" />
-                  Mobile Number (WhatsApp) *
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="checkout-first-name" className="block text-xs font-bold uppercase text-primary mb-1.5">
+                    First Name <span className="text-crimson">*</span>
+                  </label>
+                  <input
+                    id="checkout-first-name"
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    placeholder="Enter your first name"
+                    className="w-full px-4 py-2.5 rounded-xl border border-secondary/30 bg-background text-sm font-medium text-primary focus:outline-none focus:border-primary transition-colors"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="checkout-last-name" className="block text-xs font-bold uppercase text-primary mb-1.5">
+                    Last Name
+                  </label>
+                  <input
+                    id="checkout-last-name"
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    placeholder="Enter your last name"
+                    className="w-full px-4 py-2.5 rounded-xl border border-secondary/30 bg-background text-sm font-medium text-primary focus:outline-none focus:border-primary transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="checkout-email" className="block text-xs font-bold uppercase text-primary mb-1.5">
+                  Email Address (Optional)
+                </label>
+                <input
+                  id="checkout-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  className="w-full px-4 py-2.5 rounded-xl border border-secondary/30 bg-background text-sm font-medium text-primary focus:outline-none focus:border-primary transition-colors"
+                />
+              </div>
+            </div>
+
+            {/* Step 3: Delivery Address Details */}
+            <div className="p-5 sm:p-6 rounded-2xl border border-secondary/20 bg-surface shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-secondary">
+                  Step 3 • Delivery Address
                 </span>
-                <span className="text-[10px] text-secondary lowercase font-normal">
-                  tap enter to auto-fill
+                <span className="text-[11px] text-secondary flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5" />
+                  Direct Doorstep Delivery
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
-                <input
-                  type="tel"
-                  value={mobile}
-                  onChange={(e) => setMobile(e.target.value)}
-                  onKeyDown={handleMobileKeyDown}
-                  placeholder="e.g. 9876543210 (Press Enter to search)"
-                  maxLength={15}
-                  className="flex-1 px-3.5 py-2.5 rounded-xl border border-secondary/30 bg-surface text-xs sm:text-sm text-primary focus:outline-none focus:border-primary transition-colors"
-                  required
-                />
-
-                <button
-                  type="button"
-                  onClick={() => handleSearchCustomer()}
-                  disabled={searchingCustomer}
-                  className="px-4 py-2.5 rounded-xl bg-surface border border-secondary/30 hover:border-primary text-xs sm:text-sm font-bold text-primary flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-                >
-                  {searchingCustomer ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Search className="w-3.5 h-3.5" />
-                  )}
-                  <span>Search</span>
-                </button>
-              </div>
-
-              {/* Status Message */}
-              {customerSearchStatus && (
-                <p className={`text-xs mt-1.5 flex items-center gap-1.5 ${
-                  isExistingCustomer ? 'text-discount font-medium' : 'text-secondary'
-                }`}>
-                  {isExistingCustomer ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                  ) : (
-                    <MapPin className="w-3.5 h-3.5 shrink-0" />
-                  )}
-                  <span>{customerSearchStatus}</span>
-                </p>
-              )}
-            </div>
-
-            {/* Customer Name Fields */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-primary uppercase tracking-wider">
-                  First Name *
+              <div>
+                <label htmlFor="checkout-address" className="block text-xs font-bold uppercase text-primary mb-1.5">
+                  House / Flat / Street Address <span className="text-crimson">*</span>
                 </label>
-                <input
-                  type="text"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  placeholder="Enter your first name"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-secondary/25 bg-surface text-xs sm:text-sm text-primary focus:outline-none focus:border-primary transition-colors"
+                <textarea
+                  id="checkout-address"
+                  rows={2}
+                  value={houseStreet}
+                  onChange={(e) => setHouseStreet(e.target.value)}
+                  placeholder="Flat/House No., Building Name, Street, Area"
+                  className="w-full px-4 py-2.5 rounded-xl border border-secondary/30 bg-background text-sm font-medium text-primary focus:outline-none focus:border-primary transition-colors resize-none"
                   required
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-primary uppercase tracking-wider">
-                  Last Name
-                </label>
-                <input
-                  type="text"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  placeholder="Enter your last name"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-secondary/25 bg-surface text-xs sm:text-sm text-primary focus:outline-none focus:border-primary transition-colors"
-                />
-              </div>
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label htmlFor="checkout-city" className="block text-xs font-bold uppercase text-primary mb-1.5">
+                    City <span className="text-crimson">*</span>
+                  </label>
+                  <input
+                    id="checkout-city"
+                    type="text"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="e.g. Hyderabad"
+                    className="w-full px-4 py-2.5 rounded-xl border border-secondary/30 bg-background text-sm font-medium text-primary focus:outline-none focus:border-primary transition-colors"
+                    required
+                  />
+                </div>
 
-            {/* Email Address */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-primary uppercase tracking-wider">
-                Email Address (Optional)
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="yourname@gmail.com"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-secondary/25 bg-surface text-xs sm:text-sm text-primary focus:outline-none focus:border-primary transition-colors"
-              />
-            </div>
+                <div>
+                  <label htmlFor="checkout-state" className="block text-xs font-bold uppercase text-primary mb-1.5">
+                    State <span className="text-crimson">*</span>
+                  </label>
+                  <input
+                    id="checkout-state"
+                    type="text"
+                    value={stateName}
+                    onChange={(e) => setStateName(e.target.value)}
+                    placeholder="e.g. Telangana"
+                    className="w-full px-4 py-2.5 rounded-xl border border-secondary/30 bg-background text-sm font-medium text-primary focus:outline-none focus:border-primary transition-colors"
+                    required
+                  />
+                </div>
 
-            {/* Address Line */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-primary uppercase tracking-wider">
-                House / Flat / Street Address *
-              </label>
-              <input
-                type="text"
-                value={houseStreet}
-                onChange={(e) => setHouseStreet(e.target.value)}
-                placeholder="Flat No, Apartment / Building name, Street"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-secondary/25 bg-surface text-xs sm:text-sm text-primary focus:outline-none focus:border-primary transition-colors"
-                required
-              />
-            </div>
-
-            {/* City, State & Postal Code */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-primary uppercase tracking-wider">
-                  City / Town *
-                </label>
-                <input
-                  type="text"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="e.g. Hyderabad"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-secondary/25 bg-surface text-xs sm:text-sm text-primary focus:outline-none focus:border-primary transition-colors"
-                  required
-                />
+                <div>
+                  <label htmlFor="checkout-pincode" className="block text-xs font-bold uppercase text-primary mb-1.5">
+                    PIN Code <span className="text-crimson">*</span>
+                  </label>
+                  <input
+                    id="checkout-pincode"
+                    type="text"
+                    value={postalCode}
+                    onChange={(e) => setPostalCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="500001"
+                    maxLength={6}
+                    className="w-full px-4 py-2.5 rounded-xl border border-secondary/30 bg-background text-sm font-medium text-primary focus:outline-none focus:border-primary transition-colors tracking-wider"
+                    required
+                  />
+                </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-primary uppercase tracking-wider">
-                  State *
+              <div>
+                <label htmlFor="checkout-landmark" className="block text-xs font-bold uppercase text-primary mb-1.5">
+                  Landmark (Optional)
                 </label>
                 <input
+                  id="checkout-landmark"
                   type="text"
-                  value={stateName}
-                  onChange={(e) => setStateName(e.target.value)}
-                  placeholder="e.g. Telangana"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-secondary/25 bg-surface text-xs sm:text-sm text-primary focus:outline-none focus:border-primary transition-colors"
-                  required
+                  value={landmark}
+                  onChange={(e) => setLandmark(e.target.value)}
+                  placeholder="Near Metro Station / Temple / Supermarket"
+                  className="w-full px-4 py-2.5 rounded-xl border border-secondary/30 bg-background text-sm font-medium text-primary focus:outline-none focus:border-primary transition-colors"
                 />
               </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-primary uppercase tracking-wider">
-                  Postal Code *
-                </label>
-                <input
-                  type="text"
-                  value={postalCode}
-                  onChange={(e) => setPostalCode(e.target.value)}
-                  placeholder="e.g. 500001"
-                  maxLength={10}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-secondary/25 bg-surface text-xs sm:text-sm text-primary focus:outline-none focus:border-primary transition-colors"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Landmark (Optional) */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-primary uppercase tracking-wider">
-                Landmark (Optional)
-              </label>
-              <input
-                type="text"
-                value={landmark}
-                onChange={(e) => setLandmark(e.target.value)}
-                placeholder="Nearby hospital, school, or landmark"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-secondary/25 bg-surface text-xs sm:text-sm text-primary focus:outline-none focus:border-primary transition-colors"
-              />
             </div>
           </div>
 
-          {/* RIGHT COLUMN: Final Order Summary Card (matching screenshot) */}
-          <div className="lg:col-span-5 xl:col-span-4 sticky top-24 space-y-4">
+          {/* RIGHT COLUMN: Order Summary & WhatsApp Checkout CTA */}
+          <div className="lg:col-span-5 xl:col-span-4 sticky top-24">
             <div className="p-5 sm:p-6 rounded-2xl border border-secondary/20 bg-surface shadow-xs space-y-5">
-              <h2 className="text-lg sm:text-xl font-extrabold text-primary tracking-tight">
-                Final Order Summary
-              </h2>
+              <div className="flex items-center justify-between pb-2 border-b border-secondary/15">
+                <h2 className="text-lg font-extrabold text-primary tracking-tight">
+                  Order Summary
+                </h2>
+                <span className="text-xs text-secondary font-bold">
+                  {summary.itemCount} {summary.itemCount === 1 ? 'item' : 'items'}
+                </span>
+              </div>
 
               {/* Items List */}
               <div className="space-y-3 max-h-60 overflow-y-auto pr-1 pb-2 border-b border-secondary/15">
@@ -555,10 +659,122 @@ export default function CheckoutPage() {
                   </div>
                 )}
 
+                {/* Coupon Code Section */}
+                <div className="pt-1 pb-1 border-y border-dashed border-secondary/20">
+                  {!appliedCoupon ? (
+                    <div>
+                      {!showCouponInput ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCouponInput(true);
+                            setCouponError(null);
+                          }}
+                          className="text-xs font-bold text-accent hover:underline flex items-center justify-between w-full py-1 cursor-pointer group"
+                        >
+                          <span className="flex items-center gap-1.5 text-primary group-hover:text-accent transition-colors">
+                            <Tag className="w-3.5 h-3.5 text-accent" />
+                            <span>Do you have coupon?</span>
+                          </span>
+                          <span className="text-[11px] font-semibold text-accent underline underline-offset-2">
+                            Apply
+                          </span>
+                        </button>
+                      ) : (
+                        <div className="py-1 space-y-2">
+                          <div className="flex items-center justify-between text-xs font-bold text-primary">
+                            <span className="flex items-center gap-1.5">
+                              <Tag className="w-3.5 h-3.5 text-accent" />
+                              <span>Do you have coupon?</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowCouponInput(false);
+                                setCouponError(null);
+                              }}
+                              className="text-[11px] text-secondary hover:text-primary cursor-pointer font-medium"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={couponInput}
+                              onChange={(e) => {
+                                setCouponInput(e.target.value.toUpperCase());
+                                setCouponError(null);
+                              }}
+                              placeholder="ENTER CODE"
+                              className="flex-1 px-3 py-1.5 rounded-lg border border-secondary/30 bg-background text-xs font-mono font-bold uppercase tracking-wider text-primary placeholder:text-secondary/50 focus:outline-none focus:border-primary"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleApplyCoupon}
+                              disabled={couponLoading || !couponInput.trim()}
+                              className="px-3.5 py-1.5 rounded-lg bg-primary text-surface text-xs font-bold uppercase hover:bg-charcoal transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 shrink-0"
+                            >
+                              {couponLoading ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                'Apply'
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="p-2 rounded-xl bg-discount/10 border border-discount/30 flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Tag className="w-3.5 h-3.5 text-discount shrink-0" />
+                        <div className="truncate">
+                          <span className="font-mono font-bold text-xs text-discount uppercase">
+                            {appliedCoupon.code}
+                          </span>
+                          <span className="text-[11px] text-secondary block truncate">
+                            ₹{appliedCoupon.discount.toLocaleString('en-IN')} off applied
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRemoveCoupon}
+                        className="text-xs font-bold text-secondary hover:text-crimson transition-colors ml-2 cursor-pointer shrink-0"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+
+                  {couponError && (
+                    <p className="text-[11px] text-crimson font-medium pt-1 leading-snug">
+                      {couponError}
+                    </p>
+                  )}
+                </div>
+
+                {appliedCoupon && appliedCoupon.discount > 0 && (
+                  <div className="flex items-center justify-between text-discount font-medium">
+                    <span>Coupon Discount ({appliedCoupon.code})</span>
+                    <span className="font-bold">
+                      - ₹{appliedCoupon.discount.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                )}
+
+                {/* Delivery Charges (upto 2 items = 100. for every more than 2, +1 add 50) */}
                 <div className="flex items-center justify-between">
-                  <span>Delivery Charge</span>
+                  <div>
+                    <span>Delivery Charge</span>
+                    <span className="text-[11px] text-secondary ml-1">
+                      ({summary.itemCount} {summary.itemCount === 1 ? 'item' : 'items'})
+                    </span>
+                  </div>
                   <span className="font-bold text-primary">
-                    ₹100
+                    ₹{deliveryCharges.toLocaleString('en-IN')}
                   </span>
                 </div>
               </div>
@@ -574,7 +790,7 @@ export default function CheckoutPage() {
                   </span>
                 </div>
                 <span className="text-2xl sm:text-3xl font-black text-primary">
-                  ₹{(summary.totalSP + 100).toLocaleString('en-IN')}
+                  ₹{payableAmount.toLocaleString('en-IN')}
                 </span>
               </div>
 
@@ -598,8 +814,13 @@ export default function CheckoutPage() {
               </button>
 
               <p className="text-[10px] text-secondary text-center leading-relaxed">
-                Tapping <strong>Place Order</strong> records your order in Supabase and redirects to WhatsApp (<strong>+91 9912999344</strong>) for verification & dispatch.
+                By placing this order, you will be redirected to WhatsApp (+91 9912999344) to confirm and verify delivery.
               </p>
+
+              <div className="pt-2 border-t border-secondary/15 flex items-center justify-center gap-1.5 text-secondary text-[11px]">
+                <ShieldCheck className="w-3.5 h-3.5 text-accent" />
+                <span>100% Secure Checkout with Supabase Sync</span>
+              </div>
             </div>
           </div>
         </form>

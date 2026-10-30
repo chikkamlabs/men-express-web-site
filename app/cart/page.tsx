@@ -12,21 +12,52 @@ import {
   ArrowLeft,
   ArrowRight,
   ImageIcon,
+  Tag,
+  Loader2,
+  CheckCircle2,
 } from 'lucide-react';
 import Header from '@/components/header';
 import Footer from '@/components/footer';
 import CouponsSection from '@/components/couponsSection';
 import {
   useCart,
+  useAppliedCoupon,
   calculateCartSummary,
+  calculateDeliveryCharges,
   updateQuantity,
   removeFromCart,
+  setAppliedCoupon,
+  AppliedCoupon,
 } from '@/lib/cartStore';
+import { validateCoupon } from '@/lib/couponsStore';
 
 export default function CartPage() {
   const router = useRouter();
   const items = useCart();
-  const summary = calculateCartSummary(items, 100);
+  const appliedCoupon = useAppliedCoupon();
+
+  // Coupon UI state
+  const [showCouponInput, setShowCouponInput] = useState(false);
+  const [couponInput, setCouponInput] = useState('');
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
+
+  // Delivery charges: upto 2 items = 100. for every more than 2, +1 add 50
+  const deliveryCharges = calculateDeliveryCharges(
+    items.reduce((acc, i) => acc + i.quantity, 0)
+  );
+
+  // Dynamic calculations: discount must be < estimated total
+  const itemsSubtotal = items.reduce((acc, i) => acc + i.s_p * i.quantity, 0);
+  const rawEstimatedTotal = itemsSubtotal + deliveryCharges;
+  const isCouponActive =
+    appliedCoupon !== null &&
+    items.length > 0 &&
+    appliedCoupon.discount < rawEstimatedTotal;
+  const activeDiscount = isCouponActive ? appliedCoupon.discount : 0;
+
+  // Summary with dynamic delivery charges and coupon discount
+  const summary = calculateCartSummary(items, deliveryCharges, activeDiscount);
 
   const handleQtyChange = (id: string, delta: number, currentQty: number) => {
     updateQuantity(id, currentQty + delta);
@@ -34,6 +65,62 @@ export default function CartPage() {
 
   const handleRemove = (id: string) => {
     removeFromCart(id);
+  };
+
+  const handleApplyCoupon = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCode = couponInput.trim().toUpperCase();
+    if (!cleanCode) {
+      setCouponError('Please enter a coupon code.');
+      return;
+    }
+
+    setCouponLoading(true);
+    setCouponError(null);
+
+    // Business rule checks via validateCoupon:
+    // 1. Matches code in coupon_codes table
+    // 2. Status should be active (true)
+    // 3. valid_upto check
+    // 4. Threshold check (if 0 No limit)
+    // 5. discount < Estimated total (totalSP + deliveryCharges)
+    const itemsSubtotal = summary.totalSP;
+    const estimatedTotal = itemsSubtotal + summary.deliveryCharges;
+
+    const result = await validateCoupon(cleanCode, itemsSubtotal, estimatedTotal);
+    setCouponLoading(false);
+
+    if (!result.valid || !result.coupon) {
+      setCouponError(result.error || 'Invalid coupon code.');
+      return;
+    }
+
+    const discountAmount = result.discount ?? Number(result.coupon.discount);
+
+    const couponData: AppliedCoupon = {
+      code: result.coupon.code,
+      discount: discountAmount,
+      sentence: result.coupon.sentence,
+    };
+
+    setAppliedCoupon(couponData);
+    setShowCouponInput(false);
+    setCouponInput('');
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponError(null);
+  };
+
+  const handleProceedToCheckout = () => {
+    if (appliedCoupon) {
+      router.push(
+        `/checkout?coupon=${encodeURIComponent(appliedCoupon.code)}&discount=${appliedCoupon.discount}`
+      );
+    } else {
+      router.push('/checkout');
+    }
   };
 
   return (
@@ -213,8 +300,125 @@ export default function CartPage() {
                     </div>
                   )}
 
+                  {/* Below MRP Savings: "Do you have coupon?" Section */}
+                  <div className="pt-1.5 pb-1.5 border-y border-dashed border-secondary/20">
+                    {!appliedCoupon ? (
+                      <div>
+                        {!showCouponInput ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowCouponInput(true);
+                              setCouponError(null);
+                            }}
+                            className="text-xs font-bold text-accent hover:underline flex items-center justify-between w-full py-1.5 cursor-pointer group"
+                          >
+                            <span className="flex items-center gap-1.5 text-primary group-hover:text-accent transition-colors">
+                              <Tag className="w-3.5 h-3.5 text-accent" />
+                              <span>Do you have coupon?</span>
+                            </span>
+                            <span className="text-[11px] font-semibold text-accent underline underline-offset-2">
+                              Apply
+                            </span>
+                          </button>
+                        ) : (
+                          <div className="py-1 space-y-2">
+                            <div className="flex items-center justify-between text-xs font-bold text-primary">
+                              <span className="flex items-center gap-1.5">
+                                <Tag className="w-3.5 h-3.5 text-accent" />
+                                <span>Do you have coupon?</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowCouponInput(false);
+                                  setCouponError(null);
+                                }}
+                                className="text-[11px] text-secondary hover:text-primary cursor-pointer font-medium"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+
+                            <form onSubmit={handleApplyCoupon} className="flex gap-2">
+                              <input
+                                type="text"
+                                value={couponInput}
+                                onChange={(e) => {
+                                  setCouponInput(e.target.value.toUpperCase());
+                                  setCouponError(null);
+                                }}
+                                placeholder="ENTER COUPON CODE"
+                                className="flex-1 px-3 py-1.5 rounded-lg border border-secondary/30 bg-background text-xs font-mono font-bold uppercase tracking-wider text-primary placeholder:text-secondary/50 focus:outline-none focus:border-primary"
+                                autoFocus
+                              />
+                              <button
+                                type="submit"
+                                disabled={couponLoading || !couponInput.trim()}
+                                className="px-4 py-1.5 rounded-lg bg-primary text-surface text-xs font-bold uppercase hover:bg-charcoal transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 shrink-0"
+                              >
+                                {couponLoading ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  'Apply'
+                                )}
+                              </button>
+                            </form>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Applied Coupon Badge */
+                      <div className="p-2.5 rounded-xl bg-discount/10 border border-discount/30 flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Tag className="w-3.5 h-3.5 text-discount shrink-0" />
+                          <div className="truncate">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono font-bold text-xs text-discount uppercase">
+                                {appliedCoupon.code}
+                              </span>
+                              <CheckCircle2 className="w-3 h-3 text-discount" />
+                            </div>
+                            <span className="text-[11px] text-secondary block truncate">
+                              ₹{appliedCoupon.discount.toLocaleString('en-IN')} off applied
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleRemoveCoupon}
+                          className="text-xs font-bold text-secondary hover:text-crimson transition-colors ml-2 cursor-pointer shrink-0"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+
+                    {couponError && (
+                      <p className="text-[11px] text-crimson font-medium pt-1.5 leading-snug">
+                        {couponError}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Coupon Discount Row if applied */}
+                  {appliedCoupon && appliedCoupon.discount > 0 && (
+                    <div className="flex items-center justify-between text-discount font-medium">
+                      <span>Coupon Discount ({appliedCoupon.code})</span>
+                      <span className="font-bold">
+                        - ₹{appliedCoupon.discount.toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Delivery Charges (upto 2 items = 100. for every more than 2, +1 add 50) */}
                   <div className="flex items-center justify-between">
-                    <span>Delivery</span>
+                    <div>
+                      <span>Delivery</span>
+                      <span className="text-[11px] text-secondary ml-1">
+                        ({summary.itemCount} {summary.itemCount === 1 ? 'item' : 'items'})
+                      </span>
+                    </div>
                     <span className="font-semibold text-primary">
                       ₹{summary.deliveryCharges.toLocaleString('en-IN')}
                     </span>
@@ -228,7 +432,7 @@ export default function CartPage() {
                         Estimated Total
                       </span>
                       <span className="text-[10px] text-secondary">
-                        Inclusive of all taxes
+                        Inclusive of all taxes & delivery
                       </span>
                     </div>
                     <span className="text-2xl sm:text-3xl font-black text-primary">
@@ -240,7 +444,7 @@ export default function CartPage() {
                 {/* Checkout CTA Button */}
                 <button
                   type="button"
-                  onClick={() => router.push('/checkout')}
+                  onClick={handleProceedToCheckout}
                   className="w-full py-3.5 px-6 rounded-xl bg-primary text-surface font-bold text-xs sm:text-sm uppercase tracking-wider hover:bg-charcoal transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
                 >
                   <span>Proceed to Checkout</span>

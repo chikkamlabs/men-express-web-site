@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { CartItem } from './cartStore';
+import { incrementCouponUsage } from './couponsStore';
 
 export interface CustomerData {
   id?: string;
@@ -41,6 +42,8 @@ export interface PlaceOrderInput {
   items: CartItem[];
   amount: number;
   deliveryCharges: number;
+  discount?: number;
+  couponCode?: string | null;
   payableAmount: number;
 }
 
@@ -245,6 +248,9 @@ export async function placeOnlineOrder(input: PlaceOrderInput): Promise<PlaceOrd
       input.address.landmark ? ` (Landmark: ${input.address.landmark})` : ''
     }`;
 
+    const discount = Math.max(0, input.discount || 0);
+    const cleanCouponCode = input.couponCode?.trim() || null;
+
     // 4. Insert into online_orders
     const { data: orderRecord, error: orderError } = await supabase
       .from('online_orders')
@@ -252,12 +258,15 @@ export async function placeOnlineOrder(input: PlaceOrderInput): Promise<PlaceOrd
         order_id: orderId,
         customer_id: customer.id,
         amount: input.amount,
-        discount: 0.0,
+        discount: discount,
         delivery_charges: input.deliveryCharges,
         payable_amount: input.payableAmount,
+        coupon_code: cleanCouponCode,
         payment: 'pending',
         status: 'pending',
-        transaction_details: `Deliver to: ${fullName} | Phone: ${cleanMobile} | Address: ${deliveryAddressSummary}`,
+        transaction_details: `Deliver to: ${fullName} | Phone: ${cleanMobile} | Address: ${deliveryAddressSummary}${
+          cleanCouponCode ? ` | Coupon: ${cleanCouponCode} (-₹${discount})` : ''
+        }`,
       })
       .select('id, order_id')
       .single();
@@ -268,6 +277,13 @@ export async function placeOnlineOrder(input: PlaceOrderInput): Promise<PlaceOrd
         success: false,
         error: orderError?.message || 'Could not create order. Please try again.',
       };
+    }
+
+    // Increment coupon usage if used
+    if (cleanCouponCode) {
+      incrementCouponUsage(cleanCouponCode).catch((e) =>
+        console.warn('Error incrementing coupon usage:', e)
+      );
     }
 
     // 5. IF online_orders insertion success THEN ONLY insert into order_items
@@ -300,6 +316,11 @@ export async function placeOnlineOrder(input: PlaceOrderInput): Promise<PlaceOrd
 
     const customerKey = customer.key || 'MEKEY';
 
+    const couponLine =
+      cleanCouponCode && discount > 0
+        ? `*Coupon Discount (${cleanCouponCode}):* -₹${discount.toLocaleString('en-IN')}\n`
+        : '';
+
     const whatsappMessage = `*NEW ORDER - MEN EXPRESS*\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
       `*Order ID:* ${orderRecord.order_id}\n` +
@@ -308,6 +329,7 @@ export async function placeOnlineOrder(input: PlaceOrderInput): Promise<PlaceOrd
       `*Phone:* +91 ${cleanMobile}\n` +
       `\n*Items Ordered:*\n${itemLines}\n\n` +
       `*Subtotal:* ₹${input.amount.toLocaleString('en-IN')}\n` +
+      couponLine +
       `*Delivery Charges:* ₹${input.deliveryCharges.toLocaleString('en-IN')}\n` +
       `*Total Payable:* ₹${input.payableAmount.toLocaleString('en-IN')}\n` +
       `\n*Delivery Address:*\n${deliveryAddressSummary}\n` +
