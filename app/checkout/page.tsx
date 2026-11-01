@@ -183,7 +183,35 @@ export default function CheckoutPage() {
     setCouponError(null);
   };
 
-  // Place order
+  // Helper to load Cashfree JS SDK v3
+  const loadCashfreeSdk = (): Promise<(config: { mode: 'sandbox' | 'production' }) => {
+    checkout: (options: { paymentSessionId: string; redirectTarget?: '_self' | '_blank' | '_modal' }) => Promise<unknown> | void;
+  }> => {
+    return new Promise((resolve, reject) => {
+      if (typeof window !== 'undefined' && (window as unknown as { Cashfree?: unknown }).Cashfree) {
+        resolve((window as unknown as { Cashfree: (config: { mode: 'sandbox' | 'production' }) => {
+          checkout: (options: { paymentSessionId: string; redirectTarget?: '_self' | '_blank' | '_modal' }) => Promise<unknown> | void;
+        } }).Cashfree);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+      script.async = true;
+      script.onload = () => {
+        if (typeof window !== 'undefined' && (window as unknown as { Cashfree?: unknown }).Cashfree) {
+          resolve((window as unknown as { Cashfree: (config: { mode: 'sandbox' | 'production' }) => {
+            checkout: (options: { paymentSessionId: string; redirectTarget?: '_self' | '_blank' | '_modal' }) => Promise<unknown> | void;
+          } }).Cashfree);
+        } else {
+          reject(new Error('Cashfree JS SDK failed to initialize.'));
+        }
+      };
+      script.onerror = () => reject(new Error('Failed to load Cashfree checkout SDK script.'));
+      document.body.appendChild(script);
+    });
+  };
+
+  // Place order and Pay with Cashfree
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -191,7 +219,7 @@ export default function CheckoutPage() {
     // Validation
     const cleanMobile = mobile.trim().replace(/\D/g, '').slice(-10);
     if (!cleanMobile || cleanMobile.length < 10) {
-      setErrorMessage('Please enter a valid 10-digit WhatsApp mobile number.');
+      setErrorMessage('Please enter a valid 10-digit mobile number.');
       return;
     }
 
@@ -218,57 +246,65 @@ export default function CheckoutPage() {
     try {
       setPlacingOrder(true);
 
-      const result = await placeOnlineOrder({
-        customer: {
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          mobile: cleanMobile,
-          email: email.trim() || undefined,
-        },
-        address: {
-          houseStreet: houseStreet.trim(),
-          city: city.trim(),
-          state: stateName.trim(),
-          postalCode: postalCode.trim(),
-          landmark: landmark.trim() || undefined,
-        },
-        items,
-        amount: summary.totalSP,
-        deliveryCharges,
-        discount: currentDiscount,
-        couponCode: appliedCoupon?.code || null,
-        payableAmount,
+      const response = await fetch('/api/payments/cashfree/create_order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer: {
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            mobile: cleanMobile,
+            email: email.trim() || undefined,
+          },
+          address: {
+            houseStreet: houseStreet.trim(),
+            city: city.trim(),
+            state: stateName.trim(),
+            postalCode: postalCode.trim(),
+            landmark: landmark.trim() || undefined,
+          },
+          items: items.map((item) => ({
+            variantId: item.variantId,
+            productName: item.productName,
+            sizeValue: item.sizeValue,
+            colorName: item.colorName,
+            s_p: item.s_p,
+            quantity: item.quantity,
+          })),
+          amount: summary.totalSP,
+          deliveryCharges,
+          discount: currentDiscount,
+          couponCode: appliedCoupon?.code || null,
+          payableAmount,
+        }),
       });
 
-      if (!result.success || !result.whatsappUrl) {
-        setErrorMessage(result.error || 'Failed to record order. Please try again.');
-        setPlacingOrder(false);
-        return;
+      const data = await response.json();
+
+      if (!response.ok || !data.success || !data.payment_session_id) {
+        throw new Error(data.error || 'Failed to create payment session with Cashfree.');
       }
 
-      // Order saved in online_orders & order_items successfully!
-      // Clear cart and coupon
+      // Order created and recorded in online_orders & order_payments tables!
+      // Clear cart
       clearCart();
+      setAppliedCoupon(null);
 
-      setOrderPlacedData({
-        orderId: result.orderId!,
-        customerKey: result.customerKey || '',
-        whatsappUrl: result.whatsappUrl,
+      // Load Cashfree JS SDK and initiate payment checkout
+      const CashfreeSDK = await loadCashfreeSdk();
+      const cashfreeInstance = CashfreeSDK({
+        mode: data.environment === 'production' ? 'production' : 'sandbox',
       });
-      setPlacingOrder(false);
 
-      // Redirect to WhatsApp (+91 9912999344)
-      try {
-        const waWin = window.open(result.whatsappUrl, '_blank');
-        if (!waWin || waWin.closed || typeof waWin.closed === 'undefined') {
-          window.location.assign(result.whatsappUrl);
-        }
-      } catch {
-        window.location.assign(result.whatsappUrl);
-      }
+      cashfreeInstance.checkout({
+        paymentSessionId: data.payment_session_id,
+        redirectTarget: '_self',
+      });
     } catch (err) {
-      console.error('Error during checkout order placement:', err);
-      setErrorMessage('An unexpected error occurred while placing your order. Please try again.');
+      console.error('Error during Cashfree checkout payment:', err);
+      setErrorMessage(
+        err instanceof Error ? err.message : 'An unexpected error occurred while initiating payment.'
+      );
       setPlacingOrder(false);
     }
   };
@@ -803,18 +839,18 @@ export default function CheckoutPage() {
                 {placingOrder ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Placing Order...</span>
+                    <span>Initiating Payment...</span>
                   </>
                 ) : (
                   <>
-                    <Phone className="w-4 h-4 text-accent" />
-                    <span>Place Order via WhatsApp</span>
+                    <ShieldCheck className="w-4 h-4 text-accent" />
+                    <span>Place order and Pay</span>
                   </>
                 )}
               </button>
 
               <p className="text-[10px] text-secondary text-center leading-relaxed">
-                By placing this order, you will be redirected to WhatsApp (+91 9912999344) to confirm and verify delivery.
+                By clicking Place order and Pay, you will be redirected to Cashfree to securely pay via UPI, Card, or NetBanking.
               </p>
 
               <div className="pt-2 border-t border-secondary/15 flex items-center justify-center gap-1.5 text-secondary text-[11px]">
