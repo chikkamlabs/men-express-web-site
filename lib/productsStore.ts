@@ -110,7 +110,7 @@ export async function getProducts(filters?: GetProductsFilter): Promise<ProductI
     // 2. Fetch base products
     let query = supabase
       .from('products')
-      .select('id, prod_id, name, fit, collar, fabric, category_id, status, landing_page')
+      .select('id, prod_id, name, fit, collar, fabric, category_id, status, landing_page, online_available')
       .order('created_at', { ascending: false });
 
     if (targetCategoryId) {
@@ -128,7 +128,9 @@ export async function getProducts(filters?: GetProductsFilter): Promise<ProductI
       return [];
     }
 
-    let activeProducts = productsData.filter((p) => p.status !== false);
+    let activeProducts = productsData.filter(
+  (p) => p.status === true && p.online_available === true
+);
 
     // Apply search filter if provided
     if (filters?.search && filters.search.trim().length > 0) {
@@ -214,34 +216,40 @@ export async function getProducts(filters?: GetProductsFilter): Promise<ProductI
       product_color_id: string;
       mrp: number;
       s_p: number;
+      quantity: number;
       status: string;
+      online_available: boolean;
+
     }> = [];
 
     if (productColorIds.length > 0) {
-      const { data: variantsData, error: variantsError } = await supabase
-        .from('product_variants')
-        .select('id, product_id, product_color_id, mrp, s_p, status')
-        .in('product_color_id', productColorIds);
+  const { data: variantsData, error: variantsError } = await supabase
+    .from('product_variants')
+    .select('id, product_id, product_color_id, mrp, s_p, quantity, status, online_available')
+    .in('product_color_id', productColorIds);
 
-      if (variantsError) {
-        console.warn('Warning fetching product_variants:', variantsError.message);
-      } else if (variantsData) {
-        variants = variantsData;
-      }
-    } else {
-      const { data: variantsData, error: variantsError } = await supabase
-        .from('product_variants')
-        .select('id, product_id, product_color_id, mrp, s_p, status')
-        .in('product_id', productIds);
+  if (variantsError) {
+    console.warn('Warning fetching product_variants:', variantsError.message);
+  } else if (variantsData) {
+    variants = variantsData;
+  }
+}
 
-      if (variantsError) {
-        console.warn('Warning fetching product_variants by product_id:', variantsError.message);
-      } else if (variantsData) {
-        variants = variantsData;
-      }
-    }
+    const activeVariants = variants.filter(
+  (v) => v.status === 'active' && v.online_available === true
+);
 
-    const activeVariants = variants.filter((v) => v.status !== 'deactive');
+const eligibleProductIds = new Set(
+  activeVariants.map((v) => v.product_id)
+);
+
+const eligibleColorIds = new Set(
+  activeVariants.map((v) => v.product_color_id)
+);
+
+activeProducts = activeProducts.filter(
+  (p) => eligibleProductIds.has(p.id)
+);
 
     // Group pricing by product_color_id and product_id
     const pricingByColorId = new Map<string, { mrp: number; s_p: number }>();
@@ -264,7 +272,11 @@ export async function getProducts(filters?: GetProductsFilter): Promise<ProductI
     const results: ProductItem[] = [];
 
     for (const prod of activeProducts) {
-      const colorsForThisProduct = activeProductColors.filter((c) => c.product_id === prod.id);
+const colorsForThisProduct = activeProductColors.filter(
+  (c) =>
+    c.product_id === prod.id &&
+    eligibleColorIds.has(c.id)
+);
 
       const productColorsList: ProductColorInfo[] = [];
       const seenColorIds = new Set<string>();
@@ -334,7 +346,7 @@ export async function getProductById(productId: string): Promise<ProductDetail |
   try {
     const { data: prod, error: prodError } = await supabase
       .from('products')
-      .select('id, prod_id, name, fit, collar, fabric, category_id, status')
+      .select('id, prod_id, name, fit, collar, fabric, category_id, status, online_available, landing_page')
       .eq('id', productId)
       .single();
 
@@ -342,6 +354,9 @@ export async function getProductById(productId: string): Promise<ProductDetail |
       console.error('Error fetching product by id:', prodError?.message);
       return null;
     }
+    if (prod.status !== true || prod.online_available !== true) {
+  return null;
+}
 
     // Category name
     const { data: catData } = await supabase
@@ -359,60 +374,110 @@ export async function getProductById(productId: string): Promise<ProductDetail |
 
     if (pcError) {
       console.warn('Error fetching product_colors for product:', pcError.message);
+      return null;
     }
+
+    const productColorIds = (productColors || []).map((pc) => pc.id);
+
+let eligibleProductColors: typeof productColors = [];
+
+if (productColorIds.length > 0) {
+  const { data: eligibleVariants, error: eligibleVariantsError } =
+    await supabase
+      .from('product_variants')
+      .select('product_color_id')
+      .in('product_color_id', productColorIds)
+      .eq('status', 'active')
+      .eq('online_available', true);
+
+  if (eligibleVariantsError) {
+    console.error(
+      'Error fetching eligible product variants:',
+      eligibleVariantsError.message
+    );
+    return null;
+  }
+
+  const eligibleColorIds = new Set(
+    (eligibleVariants || []).map((v) => v.product_color_id)
+  );
+
+  eligibleProductColors = (productColors || []).filter(
+    (pc) => eligibleColorIds.has(pc.id)
+  );
+}
+  if (!eligibleProductColors || eligibleProductColors.length === 0) {
+  return null;
+}
 
     const colorsList: ProductColorDetail[] = [];
 
-    if (productColors && productColors.length > 0) {
-      const colorIds = productColors.map((pc) => pc.color_id);
-      const { data: masterColors } = await supabase
-        .from('colors')
-        .select('id, name, code')
-        .in('id', colorIds);
+if (eligibleProductColors && eligibleProductColors.length > 0) {
+  const colorIds = eligibleProductColors.map((pc) => pc.color_id);
 
-      const colorMap = new Map<string, { name: string; code: string }>();
-      (masterColors || []).forEach((c) => {
-        colorMap.set(c.id, { name: c.name || 'Color', code: c.code || '#0D0D0D' });
-      });
+  const { data: masterColors } = await supabase
+    .from('colors')
+    .select('id, name, code')
+    .in('id', colorIds);
 
-      // Fetch images for these colorways to find thumbnail
-      const productColorIds = productColors.map((pc) => pc.id);
-      const { data: images } = await supabase
-        .from('product_color_images')
-        .select('id, product_color_id, image_url, display_order')
-        .in('product_color_id', productColorIds)
-        .order('display_order', { ascending: true });
+  const colorMap = new Map<string, { name: string; code: string }>();
 
-      const imageById = new Map<string, string>();
-      const firstImageByColorId = new Map<string, string>();
+  (masterColors || []).forEach((c) => {
+    colorMap.set(c.id, {
+      name: c.name || 'Color',
+      code: c.code || '#0D0D0D',
+    });
+  });
 
-      (images || []).forEach((img) => {
-        if (img.id && img.image_url) {
-          imageById.set(img.id, img.image_url);
-        }
-        if (img.product_color_id && img.image_url && !firstImageByColorId.has(img.product_color_id)) {
-          firstImageByColorId.set(img.product_color_id, img.image_url);
-        }
-      });
+  // Fetch images for eligible colorways
+  const eligibleColorIds = eligibleProductColors.map((pc) => pc.id);
 
-      for (const pc of productColors) {
-        const cInfo = colorMap.get(pc.color_id) || { name: 'Color', code: '#0D0D0D' };
-        let imgUrl: string | null = null;
-        if (pc.front_image && imageById.has(pc.front_image)) {
-          imgUrl = imageById.get(pc.front_image) || null;
-        } else if (firstImageByColorId.has(pc.id)) {
-          imgUrl = firstImageByColorId.get(pc.id) || null;
-        }
+  const { data: images } = await supabase
+    .from('product_color_images')
+    .select('id, product_color_id, image_url, display_order')
+    .in('product_color_id', eligibleColorIds)
+    .order('display_order', { ascending: true });
 
-        colorsList.push({
-          id: pc.id,
-          color_id: pc.color_id,
-          name: cInfo.name,
-          code: cInfo.code,
-          image_url: imgUrl,
-        });
-      }
+  const imageById = new Map<string, string>();
+  const firstImageByColorId = new Map<string, string>();
+
+  (images || []).forEach((img) => {
+    if (img.id && img.image_url) {
+      imageById.set(img.id, img.image_url);
     }
+
+    if (
+      img.product_color_id &&
+      img.image_url &&
+      !firstImageByColorId.has(img.product_color_id)
+    ) {
+      firstImageByColorId.set(img.product_color_id, img.image_url);
+    }
+  });
+
+  for (const pc of eligibleProductColors) {
+    const cInfo = colorMap.get(pc.color_id) || {
+      name: 'Color',
+      code: '#0D0D0D',
+    };
+
+    let imgUrl: string | null = null;
+
+    if (pc.front_image && imageById.has(pc.front_image)) {
+      imgUrl = imageById.get(pc.front_image) || null;
+    } else if (firstImageByColorId.has(pc.id)) {
+      imgUrl = firstImageByColorId.get(pc.id) || null;
+    }
+
+    colorsList.push({
+      id: pc.id,
+      color_id: pc.color_id,
+      name: cInfo.name,
+      code: cInfo.code,
+      image_url: imgUrl,
+    });
+  }
+}
 
     return {
       id: prod.id,
@@ -468,7 +533,8 @@ export async function getColorVariants(productColorId: string): Promise<ProductV
       .from('product_variants')
       .select('id, product_id, product_color_id, size_id, barcode, mrp, s_p, quantity, status, online_available')
       .eq('product_color_id', productColorId)
-      .neq('status', 'deactive')
+      .eq('status', 'active')
+      .eq('online_available', true)
       .order('created_at', { ascending: true });
 
     if (vError) {

@@ -495,13 +495,6 @@ function ProductCardItem({ product }: { product: ProductItem }) {
         )}
       </div>
 
-      {/* Best price indicator (matching reference screenshot) */}
-      {product.best_price > 0 && (
-        <div className="text-[11px] sm:text-xs text-discount font-semibold leading-none">
-          Best price ₹{product.best_price.toLocaleString('en-IN')}
-        </div>
-      )}
-
       {/* Available colors below price: rounded circle filled with color */}
       {product.colors && product.colors.length > 0 && (
         <div className="pt-0.5 flex items-center gap-1.5 flex-wrap" aria-label="Available colors">
