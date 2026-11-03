@@ -24,8 +24,10 @@ export async function getFeaturedProducts(): Promise<FeaturedProduct[]> {
     // Step 1: Find the products.id where products.landing_page = true
     const { data: products, error: prodError } = await supabase
       .from('products')
-      .select('id, prod_id, name, fit, status, landing_page')
-      .eq('landing_page', true);
+      .select('id, prod_id, name, fit, status, landing_page, online_available')
+      .eq('landing_page', true)
+      .eq('online_available', true)
+      .eq('status', true);
 
     if (prodError) {
       console.error('Error in Step 1 (fetching products):', prodError.message);
