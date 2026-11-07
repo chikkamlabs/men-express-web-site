@@ -581,7 +581,7 @@ function ProductDetailContent() {
               </div>
               <div className="flex flex-col items-center gap-1.5">
                 <RotateCcw className="w-4 h-4 text-primary" />
-                <span>Easy 7-Day Returns</span>
+                <span>Easy 7-Day Exchange</span>
               </div>
               <div className="flex flex-col items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-primary" />
