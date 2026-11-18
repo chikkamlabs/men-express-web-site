@@ -145,7 +145,7 @@ export default function OrderDetails({ order, onBack }: OrderDetailsProps) {
               <div>
                 <p className="font-bold">This order was cancelled</p>
                 <p className="text-xs opacity-80 mt-0.5">
-                  Contact support on WhatsApp (+91 9912999344) for assistance or re-ordering.
+                  Contact support on WhatsApp (+91 9912999414) for assistance or re-ordering.
                 </p>
               </div>
             </div>

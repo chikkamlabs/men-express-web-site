@@ -25,9 +25,9 @@ export default function ReachUsPage() {
   const [sentToast, setSentToast] = useState(false);
 
   const STORE_MAP_URL = 'https://maps.app.goo.gl/hYBvHUdhut6iDh3g6';
-  const STORE_PHONE = '+919912999344';
-  const STORE_PHONE_DISPLAY = '+91 9912999344';
-  const WHATSAPP_NUMBER = '919912999344';
+  const STORE_PHONE = '+919912999414';
+  const STORE_PHONE_DISPLAY = '+91 9912999414';
+  const WHATSAPP_NUMBER = '919912999414';
 
   const handleSendEnquiry = (e: React.FormEvent) => {
     e.preventDefault();
@@ -273,7 +273,7 @@ export default function ReachUsPage() {
               </form>
 
               <p className="text-[10px] text-secondary text-center leading-relaxed">
-                Your message will open directly in WhatsApp with our official store support (+91 9912999344).
+                Your message will open directly in WhatsApp with our official store support (+91 9912999414).
               </p>
             </div>
           </div>

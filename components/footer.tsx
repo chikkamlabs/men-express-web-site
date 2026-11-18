@@ -28,7 +28,7 @@ const policies: Record<
           'Legal Name: VENKATA ARUN GOVIL KOLLEPARA',
           'Business / Trade Name: SATYAS MEN EXPRESS',
           'Email Address: menexpress.team@gmail.com',
-          'Contact Number: 9912999344',
+          'Contact Number: 9912999414',
         ],
       },
     ],

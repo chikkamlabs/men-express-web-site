@@ -203,7 +203,7 @@ export async function saveCustomerAddress(
  * 1. Upserts customer & saves address
  * 2. Inserts into online_orders table
  * 3. ONLY if online_orders insertion is successful, inserts line items into order_items table
- * 4. Generates WhatsApp confirmation redirect for +91 9912999344
+ * 4. Generates WhatsApp confirmation redirect for +91 9912999414
  */
 export async function placeOnlineOrder(input: PlaceOrderInput): Promise<PlaceOrderResult> {
   try {
@@ -304,7 +304,7 @@ export async function placeOnlineOrder(input: PlaceOrderInput): Promise<PlaceOrd
       // We still have the order record created
     }
 
-    // 6. Generate WhatsApp redirect message for target number 9912999344
+    // 6. Generate WhatsApp redirect message for target number 9912999414
     const itemLines = input.items
       .map(
         (i, idx) =>
@@ -336,7 +336,7 @@ export async function placeOnlineOrder(input: PlaceOrderInput): Promise<PlaceOrd
       `━━━━━━━━━━━━━━━━━━━━\n` +
       `*Save your Order ID and Profile Key to track your order online!*`;
 
-    const targetPhone = '919912999344';
+    const targetPhone = '919912999414';
     const whatsappUrl = `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessage)}`;
 
     return {

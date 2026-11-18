@@ -280,7 +280,7 @@ function ProfilePageContent() {
                 <div className="p-3.5 rounded-2xl bg-accent/15 border border-accent/40 text-primary flex items-start gap-2.5 text-xs">
                   <Info className="w-4 h-4 text-discount shrink-0 mt-0.5" />
                   <p className="leading-relaxed">
-                    <strong>Hint:</strong> You received your <strong>Order ID</strong> (e.g. <code>ME-XXXXXX-XXXX</code>) and <strong>Profile Key</strong> on WhatsApp (+91 9912999344) when your order was placed.
+                    <strong>Hint:</strong> You received your <strong>Order ID</strong> (e.g. <code>ME-XXXXXX-XXXX</code>) and <strong>Profile Key</strong> on WhatsApp (+91 9912999414) when your order was placed.
                   </p>
                 </div>
 
@@ -368,7 +368,7 @@ function ProfilePageContent() {
                 <div className="p-3.5 rounded-2xl bg-accent/15 border border-accent/40 text-primary flex items-start gap-2.5 text-xs">
                   <Sparkles className="w-4 h-4 text-discount shrink-0 mt-0.5" />
                   <p className="leading-relaxed">
-                    <strong>Note:</strong> Your Profile Key was created when placing an order and sent to your WhatsApp number (+91 9912999344).
+                    <strong>Note:</strong> Your Profile Key was created when placing an order and sent to your WhatsApp number (+91 9912999414).
                   </p>
                 </div>
 

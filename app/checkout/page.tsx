@@ -354,7 +354,7 @@ export default function CheckoutPage() {
                 className="w-full py-3.5 px-6 rounded-xl bg-discount text-surface font-bold text-sm uppercase tracking-wider hover:bg-emerald transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Phone className="w-4 h-4" />
-                <span>Confirm on WhatsApp (+91 9912999344)</span>
+                <span>Confirm on WhatsApp (+91 9912999414)</span>
               </a>
 
               <Link
@@ -417,7 +417,7 @@ export default function CheckoutPage() {
               Checkout
             </h1>
             <p className="text-xs text-secondary">
-              Direct dispatch & WhatsApp verification (+91 9912999344)
+              Direct dispatch & WhatsApp verification (+91 9912999414)
             </p>
           </div>
         </div>
@@ -467,7 +467,7 @@ export default function CheckoutPage() {
                         }
                       }}
                       onKeyDown={handleMobileKeyDown}
-                      placeholder="9912999344"
+                      placeholder="9912999414"
                       className="w-full pl-12 pr-4 py-3 rounded-xl border border-secondary/30 bg-background text-sm font-semibold text-primary focus:outline-none focus:border-primary transition-all tracking-wider"
                       required
                     />
